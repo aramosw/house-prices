@@ -10,7 +10,9 @@ YEARS_PER_DECADE = 10
 
 ABSENT_COLUMNS = ["Alley", "FireplaceQu", "Fence"]
 
-LOT_FRONTAGE_FIT_EXCLUDE = [935, 1299, 314, 1338]
+OUTLIER_IDS = [1299, 524]
+
+LOT_FRONTAGE_FIT_EXCLUDE = [935, 314, 1338]
 LOT_CONFIGS = ["Corner", "CulDSac", "FR2", "FR3"]
 TOWNHOUSES = ["Twnhs", "TwnhsE"]
 
@@ -259,7 +261,8 @@ def fill_absent(df: pd.DataFrame, columns: list[str]) -> pd.DataFrame:
 
 def fill_pool_qc(df: pd.DataFrame, train: pd.DataFrame) -> pd.DataFrame:
     """
-    Fill missing PoolQC with "None" if the house has no pool, otherwise with the most common rating among train pools.
+    Fill missing PoolQC with "None" if the house has no pool, otherwise with the most common rating among
+    train pools for houses with the same ExterQual.
 
     Parameters:
     df (pd.DataFrame): The data to fill, either train or test.
@@ -269,11 +272,11 @@ def fill_pool_qc(df: pd.DataFrame, train: pd.DataFrame) -> pd.DataFrame:
     pd.DataFrame: A copy of df with PoolQC filled.
     """
     df = df.copy()
-    pool_rating = _most_common(train.loc[train["PoolArea"] > 0, "PoolQC"])
+    no_pool = df["PoolQC"].isnull() & ~(df["PoolArea"] > 0)
+    df.loc[no_pool, "PoolQC"] = NONE
 
-    missing = df["PoolQC"].isnull()
-    df.loc[missing, "PoolQC"] = np.where(df.loc[missing, "PoolArea"] > 0, pool_rating, NONE)
-    return df
+    train_pools = train[train["PoolArea"] > 0]
+    return _fill_with_group_mode(df, train_pools, "PoolQC", "ExterQual")
 
 
 def fill_misc_feature(df: pd.DataFrame, train: pd.DataFrame) -> pd.DataFrame:
@@ -399,21 +402,38 @@ def fill_garage(df: pd.DataFrame, train: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
+def remove_outliers(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Drop the training houses that the EDA found to be outliers (OUTLIER_IDS).
+
+    Test houses are never removed, as their Ids are not in the list.
+
+    Parameters:
+    df (pd.DataFrame): The data, indexed by Id.
+
+    Returns:
+    pd.DataFrame: A copy of df without the outlier houses.
+    """
+    return df.drop(index=OUTLIER_IDS, errors="ignore")
+
+
 def clean(df: pd.DataFrame, train: pd.DataFrame) -> pd.DataFrame:
     """
-    Fill every missing value in df, drop Utilities, and add the missing-value flags.
+    Remove the outlier houses, fill every missing value in df, drop Utilities, and add the missing-value flags.
 
-    All statistics come from train, so the same call cleans train and test without using any test information.
-    Pass train as it is loaded from the CSV file, not an already cleaned copy.
+    All statistics come from train without the outlier houses, so the same call cleans train and test
+    without using any test information. Pass train as it is loaded from the CSV file, not an already cleaned copy.
 
     Parameters:
     df (pd.DataFrame): The data to clean, either train or test.
     train (pd.DataFrame): The raw training data, used to fit the models and find the most common values.
 
     Returns:
-    pd.DataFrame: A cleaned copy of df, with no missing values, and the flags LotFrontageMissing,
-    MasVnrMissing and HasGarage added.
+    pd.DataFrame: A cleaned copy of df, without the outlier houses and with no missing values, and the flags
+    LotFrontageMissing, MasVnrMissing and HasGarage added.
     """
+    train = remove_outliers(train)
+    df = remove_outliers(df)
     model, bounds = fit_lot_frontage(train)
     df = fill_lot_frontage(df, model, bounds)
     df = fill_ms_zoning(df, train)
