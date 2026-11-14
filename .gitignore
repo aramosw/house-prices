@@ -5,6 +5,9 @@ data/
 access_token
 kaggle.json
 
+# Submission files
+submissions/
+
 # Python
 .venv/
 __pycache__/
