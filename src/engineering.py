@@ -12,8 +12,9 @@ MIN_LEVEL_COUNT = 10
 BATHROOM_COLUMNS = ["FullBath", "HalfBath", "BsmtFullBath", "BsmtHalfBath"]
 YEAR_COLUMNS = ["YearBuilt", "YearRemodAdd", "GarageYrBlt"]
 SUM_PARTS = ["1stFlrSF", "BsmtUnfSF"]
+TOTAL_AREA_PARTS = ["TotalBsmtSF"]
 REPEATED_COLUMNS = ["HasGarage", "Exterior2nd"]
-REPLACED_COLUMNS = BATHROOM_COLUMNS + YEAR_COLUMNS + SUM_PARTS + REPEATED_COLUMNS
+REPLACED_COLUMNS = BATHROOM_COLUMNS + YEAR_COLUMNS + SUM_PARTS + TOTAL_AREA_PARTS + REPEATED_COLUMNS
 
 DUPLICATE_COLUMNS = ["BldgType_Duplex"]
 
@@ -21,11 +22,11 @@ NEAR_DUPLICATE_COLUMNS = ["BldgType_2fmCon", "SaleCondition_Partial", "GarageCon
 OVERLAPPING_PREFIXES = ["MSSubClass_"]
 
 CONTINUOUS_COLUMNS = [
-    "LotFrontage", "LotArea", "MasVnrArea", "BsmtFinSF1", "BsmtFinSF2", "TotalBsmtSF", "2ndFlrSF", "LowQualFinSF", "GrLivArea",
-    "GarageArea", "WoodDeckSF", "OpenPorchSF", "EnclosedPorch", "3SsnPorch", "ScreenPorch", "PoolArea", "MiscVal",
+    "LotFrontage", "LotArea", "MasVnrArea", "BsmtFinSF1", "BsmtFinSF2", "2ndFlrSF", "LowQualFinSF", "GrLivArea",
+    "GarageArea", "WoodDeckSF", "OpenPorchSF", "EnclosedPorch", "3SsnPorch", "ScreenPorch", "PoolArea", "MiscVal", "TotalSF",
 ]
-SKEW_THRESHOLD = 1
-MAX_ZERO_SHARE = 0.5
+SKEW_THRESHOLD = 0.75
+SQUARE_MAX_ZERO_SHARE = 0.5
 
 QUALITY_COLUMN = "OverallQual"
 SIZE_COLUMN = "LogGrLivArea"
@@ -67,10 +68,11 @@ def combine_columns(df: pd.DataFrame) -> pd.DataFrame:
     df (pd.DataFrame): The cleaned data, either train or test.
 
     Returns:
-    pd.DataFrame: A copy of df with TotalBathrooms, HouseAge, RemodelAge, GarageAge and HasSecondExterior added,
-    and the columns they replace dropped.
+    pd.DataFrame: A copy of df with TotalBathrooms, TotalSF, HouseAge, RemodelAge, GarageAge and HasSecondExterior
+    added, and the columns they replace dropped.
     """
     df = df.copy()
+    df["TotalSF"] = df["TotalBsmtSF"] + df["1stFlrSF"] + df["2ndFlrSF"]
     df["TotalBathrooms"] = df["FullBath"] + 0.5 * df["HalfBath"] + df["BsmtFullBath"] + 0.5 * df["BsmtHalfBath"]
     df["HouseAge"] = df["YrSold"] - df["YearBuilt"]
     df["RemodelAge"] = df["YrSold"] - df["YearRemodAdd"]
@@ -165,9 +167,10 @@ def drop_collinear(features: pd.DataFrame) -> pd.DataFrame:
 
 def find_skewed(train_features: pd.DataFrame) -> list[str]:
     """
-    Find the continuous columns worth a log transform: a skew above SKEW_THRESHOLD, and at most MAX_ZERO_SHARE zeros.
+    Find the continuous columns to take log(1 + x) of: those with a skew above SKEW_THRESHOLD.
 
-    A column that is mostly zeros has a spike at 0 that a log does not remove. Found on train only, then applied to both.
+    Found on train only, then applied to both train and test. A column that is not in the features, such as TotalSF
+    before it is added, is skipped.
 
     Parameters:
     train_features (pd.DataFrame): The train features.
@@ -175,8 +178,7 @@ def find_skewed(train_features: pd.DataFrame) -> list[str]:
     Returns:
     list[str]: The names of the columns to transform.
     """
-    columns = train_features[CONTINUOUS_COLUMNS]
-    return [column for column in CONTINUOUS_COLUMNS if stats.skew(columns[column]) > SKEW_THRESHOLD and (columns[column] == 0).mean() <= MAX_ZERO_SHARE]
+    return [column for column in CONTINUOUS_COLUMNS if column in train_features.columns and stats.skew(train_features[column]) > SKEW_THRESHOLD]
 
 
 def log_transform(features: pd.DataFrame, columns: list[str]) -> pd.DataFrame:
@@ -270,7 +272,7 @@ def replace_neighbourhood(features: pd.DataFrame, train: pd.DataFrame, df: pd.Da
 
 def square_candidates(features: pd.DataFrame) -> list[str]:
     """
-    The columns worth testing for curvature: more than MIN_DISTINCT_VALUES distinct values, and at most MAX_ZERO_SHARE zeros.
+    The columns worth testing for curvature: more than MIN_DISTINCT_VALUES distinct values, and at most SQUARE_MAX_ZERO_SHARE zeros.
 
     The square of a column that is mostly zeros is decided by a handful of houses.
 
@@ -280,7 +282,7 @@ def square_candidates(features: pd.DataFrame) -> list[str]:
     Returns:
     list[str]: The names of the candidate columns.
     """
-    return [column for column in features.columns if features[column].nunique() > MIN_DISTINCT_VALUES and (features[column] == 0).mean() <= MAX_ZERO_SHARE]
+    return [column for column in features.columns if features[column].nunique() > MIN_DISTINCT_VALUES and (features[column] == 0).mean() <= SQUARE_MAX_ZERO_SHARE]
 
 
 def add_squares(features: pd.DataFrame, train_features: pd.DataFrame, columns: list[str]) -> pd.DataFrame:

@@ -11,7 +11,7 @@ def make_features(
     fit_raw: pd.DataFrame, df_raw: pd.DataFrame, skewed: list[str]
 ) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     """
-    Build the features of ols_v02, without dropping the collinear columns.
+    Build the features of the linear regression notebook, without dropping the collinear columns.
 
     Everything that learns from the data (the fills, the levels, the means for the squares) is fitted on fit_raw only,
     so the same call can be used on each fold of a cross-validation, and on all of train and test at the end.
