@@ -359,7 +359,7 @@ TREE_QUALITY_COLUMNS = ["ExterQual", "KitchenQual", "BsmtQual", "HeatingQC", "Fi
 PORCH_COLUMNS = ["WoodDeckSF", "OpenPorchSF", "EnclosedPorch", "3SsnPorch", "ScreenPorch"]
 
 
-def _group_mean(train_keys: pd.Series, train_target: pd.Series, df_keys: pd.Series, out_of_fold: bool) -> np.ndarray:
+def group_mean(train_keys: pd.Series, train_target: pd.Series, df_keys: pd.Series, out_of_fold: bool) -> np.ndarray:
     """The smoothed mean of the target for each key, out of fold within train when df is train itself."""
 
     def smoothed(keys, target):
@@ -410,7 +410,7 @@ def add_tree_features(features: pd.DataFrame, df: pd.DataFrame, train_features: 
 
     out_of_fold = df.index.equals(train.index)
     log_price = np.log(train["SalePrice"])
-    features["NeighbourhoodPrice"] = _group_mean(train["Neighborhood"], log_price, df["Neighborhood"], out_of_fold)
+    features["NeighbourhoodPrice"] = group_mean(train["Neighborhood"], log_price, df["Neighborhood"], out_of_fold)
     log_price_per_sf = log_price - np.log(train_features["TotalSF"])
-    features["ExpectedLogPrice"] = np.log(features["TotalSF"]) + _group_mean(train["Neighborhood"], log_price_per_sf, df["Neighborhood"], out_of_fold)
+    features["ExpectedLogPrice"] = np.log(features["TotalSF"]) + group_mean(train["Neighborhood"], log_price_per_sf, df["Neighborhood"], out_of_fold)
     return features
