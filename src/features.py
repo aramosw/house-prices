@@ -417,7 +417,7 @@ def remove_outliers(df: pd.DataFrame) -> pd.DataFrame:
     return df.drop(index=OUTLIER_IDS, errors="ignore")
 
 
-def clean(df: pd.DataFrame, train: pd.DataFrame) -> pd.DataFrame:
+def clean(df: pd.DataFrame, train: pd.DataFrame, drop_outliers: bool = True) -> pd.DataFrame:
     """
     Remove the outlier houses, fill every missing value in df, drop Utilities, and add the missing-value flags.
 
@@ -427,13 +427,15 @@ def clean(df: pd.DataFrame, train: pd.DataFrame) -> pd.DataFrame:
     Parameters:
     df (pd.DataFrame): The data to clean, either train or test.
     train (pd.DataFrame): The raw training data, used to fit the models and find the most common values.
+    drop_outliers (bool): Whether to drop the outlier houses from df. The statistics never use them.
 
     Returns:
-    pd.DataFrame: A cleaned copy of df, without the outlier houses and with no missing values, and the flags
-    LotFrontageMissing, MasVnrMissing and HasGarage added.
+    pd.DataFrame: A cleaned copy of df, without the outlier houses (unless drop_outliers is False) and with no
+    missing values, and the flags LotFrontageMissing, MasVnrMissing and HasGarage added.
     """
     train = remove_outliers(train)
-    df = remove_outliers(df)
+    if drop_outliers:
+        df = remove_outliers(df)
     model, bounds = fit_lot_frontage(train)
     df = fill_lot_frontage(df, model, bounds)
     df = fill_ms_zoning(df, train)

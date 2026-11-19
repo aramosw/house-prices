@@ -299,3 +299,118 @@ def add_squares(features: pd.DataFrame, train_features: pd.DataFrame, columns: l
     """
     squares = {f"{column}Squared": (features[column] - train_features[column].mean()) ** 2 for column in columns}
     return pd.concat([features, pd.DataFrame(squares, index=features.index)], axis=1)
+
+
+def engineer_categorical(df: pd.DataFrame, train: pd.DataFrame, min_count: int = MIN_LEVEL_COUNT) -> pd.DataFrame:
+    """
+    Like engineer, but the nominal columns stay as single categorical columns instead of one-hot dummies.
+
+    This is the form for the tree libraries that handle categories themselves. The levels come from train only. A level
+    with fewer than min_count train houses, and a level not in train, is grouped as Other, which is always a level.
+
+    Parameters:
+    df (pd.DataFrame): The cleaned data, either train or test.
+    train (pd.DataFrame): The cleaned training data, used to find the levels.
+    min_count (int): The fewest train houses a level needs to keep its own level.
+
+    Returns:
+    pd.DataFrame: The feature columns of df, without SalePrice, with the nominal columns as pandas categories.
+    """
+    df = encode_ordered(combine_columns(df.drop(columns="SalePrice", errors="ignore")))
+    train = encode_ordered(combine_columns(train.drop(columns="SalePrice", errors="ignore")))
+
+    for data in (df, train):
+        data[CODE_CATEGORIES] = data[CODE_CATEGORIES].astype(str)
+    nominal = [column for column in train.columns if not pd.api.types.is_numeric_dtype(train[column])]
+    for column in nominal:
+        counts = train[column].astype(str).value_counts()
+        common = list(counts[counts >= min_count].index)
+        grouped = df[column].astype(str).where(df[column].astype(str).isin(common), OTHER)
+        df[column] = pd.Categorical(grouped, categories=common + [OTHER])
+    return df
+
+
+def order_by_target(train_features: pd.DataFrame, log_price: pd.Series, df_features: pd.DataFrame) -> pd.DataFrame:
+    """
+    Replace each categorical column by the smoothed mean log price of its level, for models that need numbers.
+
+    A tree that splits on this number can separate the levels in the best way, because for squared error the best
+    split of a category puts the levels in order of their mean target. The means come from train only, and are pulled
+    towards the overall mean as if each level had SMOOTHING extra houses.
+
+    Parameters:
+    train_features (pd.DataFrame): The categorical features of the fitting houses, from engineer_categorical.
+    log_price (pd.Series): The log price of the fitting houses, with the same index.
+    df_features (pd.DataFrame): The categorical features to encode, either the fitting houses or others.
+
+    Returns:
+    pd.DataFrame: A copy of df_features with every categorical column replaced by numbers.
+    """
+    encoded = df_features.copy()
+    overall = log_price.mean()
+    for column in train_features.columns[train_features.dtypes == "category"]:
+        groups = log_price.groupby(train_features[column], observed=False).agg(["sum", "count"])
+        means = (groups["sum"] + SMOOTHING * overall) / (groups["count"] + SMOOTHING)
+        encoded[column] = df_features[column].astype(object).map(means).astype(float).fillna(overall)
+    return encoded
+
+
+TREE_QUALITY_COLUMNS = ["ExterQual", "KitchenQual", "BsmtQual", "HeatingQC", "FireplaceQu", "GarageQual"]
+PORCH_COLUMNS = ["WoodDeckSF", "OpenPorchSF", "EnclosedPorch", "3SsnPorch", "ScreenPorch"]
+
+
+def _group_mean(train_keys: pd.Series, train_target: pd.Series, df_keys: pd.Series, out_of_fold: bool) -> np.ndarray:
+    """The smoothed mean of the target for each key, out of fold within train when df is train itself."""
+
+    def smoothed(keys, target):
+        overall = target.mean()
+        groups = target.groupby(keys).agg(["sum", "count"])
+        return (groups["sum"] + SMOOTHING * overall) / (groups["count"] + SMOOTHING), overall
+
+    if not out_of_fold:
+        means, overall = smoothed(train_keys, train_target)
+        return df_keys.map(means).astype(float).fillna(overall).to_numpy()
+    encoded = np.empty(len(train_keys))
+    for fit_index, other_index in KFold(ENCODING_FOLDS, shuffle=True, random_state=ENCODING_SEED).split(train_keys):
+        means, overall = smoothed(train_keys.iloc[fit_index], train_target.iloc[fit_index])
+        encoded[other_index] = train_keys.iloc[other_index].map(means).astype(float).fillna(overall).to_numpy()
+    return encoded
+
+
+def add_tree_features(features: pd.DataFrame, df: pd.DataFrame, train_features: pd.DataFrame, train: pd.DataFrame) -> pd.DataFrame:
+    """
+    Add the extra columns for the tree models: quality scores, ratios, flags and neighbourhood prices.
+
+    Trees cannot form sums, products or ratios of columns by themselves, so these give them combinations directly. The
+    neighbourhood prices use the log price, so for train itself each house gets its value from the other folds of train.
+
+    Parameters:
+    features (pd.DataFrame): The features of df, from engineer.
+    df (pd.DataFrame): The cleaned data that features came from, either train or test.
+    train_features (pd.DataFrame): The features of train, from engineer.
+    train (pd.DataFrame): The cleaned train data, with Neighborhood and SalePrice.
+
+    Returns:
+    pd.DataFrame: A copy of features with the extra columns.
+    """
+    features = features.copy()
+    features["QualityScore"] = features[TREE_QUALITY_COLUMNS].mean(axis=1)
+    features["QualityTimesTotalSF"] = features["OverallQual"] * features["TotalSF"]
+    features["QualityTimesLivingArea"] = features["OverallQual"] * features["GrLivArea"]
+    features["QualityTimesCondition"] = features["OverallQual"] * features["OverallCond"]
+
+    features["LivingToLotRatio"] = features["GrLivArea"] / features["LotArea"]
+    median_size = train_features["TotalSF"].groupby(train["Neighborhood"]).median()
+    features["RelativeSize"] = features["TotalSF"] / df["Neighborhood"].map(median_size).astype(float).fillna(train_features["TotalSF"].median())
+    features["TotalPorchSF"] = features[PORCH_COLUMNS].sum(axis=1)
+
+    features["IsNew"] = (features["HouseAge"] <= 1).astype(int)
+    features["Remodelled"] = (features["RemodelAge"] < features["HouseAge"]).astype(int)
+    features["YearMonthSold"] = df["YrSold"] + (df["MoSold"] - 1) / 12
+
+    out_of_fold = df.index.equals(train.index)
+    log_price = np.log(train["SalePrice"])
+    features["NeighbourhoodPrice"] = _group_mean(train["Neighborhood"], log_price, df["Neighborhood"], out_of_fold)
+    log_price_per_sf = log_price - np.log(train_features["TotalSF"])
+    features["ExpectedLogPrice"] = np.log(features["TotalSF"]) + _group_mean(train["Neighborhood"], log_price_per_sf, df["Neighborhood"], out_of_fold)
+    return features
