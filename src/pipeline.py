@@ -1,6 +1,6 @@
 import pandas as pd
 
-from src.engineering import add_squares, engineer, log_transform
+from src.engineering import add_squares, add_tree_features, engineer, log_transform
 from src.features import clean
 
 
@@ -8,7 +8,7 @@ SQUARED_COLUMNS = ["OverallQual"]
 
 
 def make_features(
-    fit_raw: pd.DataFrame, df_raw: pd.DataFrame, skewed: list[str], drop_outliers: bool = True
+    fit_raw: pd.DataFrame, df_raw: pd.DataFrame, skewed: list[str], drop_outliers: bool = True, tree_features: bool = False
 ) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     """
     Build the features of the linear regression notebook, without dropping the collinear columns.
@@ -21,12 +21,15 @@ def make_features(
     df_raw (pd.DataFrame): The raw houses to build features for, either the same train houses, a validation fold or test.
     skewed (list[str]): The columns to take log(1 + x) of.
     drop_outliers (bool): Whether to drop the outlier houses from df_raw. The fit houses never include them.
+    tree_features (bool): Whether to add the extra columns of add_tree_features, before the logs are taken.
 
     Returns:
     tuple: The cleaned fit houses, the cleaned df houses, the features of the fit houses and the features of the df houses.
     """
     fit_clean, df_clean = clean(fit_raw, fit_raw), clean(df_raw, fit_raw, drop_outliers=drop_outliers)
     fit_features, df_features = engineer(fit_clean, fit_clean), engineer(df_clean, fit_clean)
+    if tree_features:
+        fit_features, df_features = add_tree_features(fit_features, fit_clean, fit_features, fit_clean), add_tree_features(df_features, df_clean, fit_features, fit_clean)
     fit_features, df_features = log_transform(fit_features, skewed), log_transform(df_features, skewed)
     return (
         fit_clean,

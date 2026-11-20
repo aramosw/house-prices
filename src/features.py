@@ -242,12 +242,15 @@ def fill_masonry(df: pd.DataFrame, train: pd.DataFrame) -> pd.DataFrame:
     veneer_type = _most_common(veneers["MasVnrType"])
     area_by_type = veneers.groupby("MasVnrType")["MasVnrArea"].median()
 
+    # The assignments are skipped when no row needs them, as pandas rejects an empty assignment to some dtypes.
     has_veneer = df["MasVnrType"].isnull() & (df["MasVnrArea"] > 0)
-    df.loc[has_veneer, "MasVnrType"] = veneer_type
+    if has_veneer.any():
+        df.loc[has_veneer, "MasVnrType"] = veneer_type
     df = _fill_with_group_mode(df, train, "MasVnrType", "Neighborhood")
 
     missing_area = df["MasVnrArea"].isnull()
-    df.loc[missing_area, "MasVnrArea"] = df.loc[missing_area, "MasVnrType"].map(area_by_type).fillna(0)
+    if missing_area.any():
+        df.loc[missing_area, "MasVnrArea"] = df.loc[missing_area, "MasVnrType"].map(area_by_type).fillna(0)
 
     return df
 
