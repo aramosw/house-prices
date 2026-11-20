@@ -1,1 +1,1 @@
-Solution to [Kaggle Competition](https://www.kaggle.com/competitions/house-prices-advanced-regression-techniques/). Ranked 281/4936 as of 20/11/2026
+Solution to [Kaggle Competition](https://www.kaggle.com/competitions/house-prices-advanced-regression-techniques/). Ranked 281/4936 as of 20/11/2026. Since this is an unverified competition, a large majority of the scores above us contain data leakage or train models using the entire dataset.
